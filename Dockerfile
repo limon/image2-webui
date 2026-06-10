@@ -11,7 +11,8 @@ RUN pip install --no-cache-dir uv
 COPY app/pyproject.toml app/uv.lock ./
 RUN uv sync --frozen --no-dev
 
-COPY app/ ./
+COPY app/main.py ./main.py
+COPY app/static ./static
 
 RUN mkdir -p /app/data/jobs /app/data/files
 

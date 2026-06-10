@@ -2316,6 +2316,16 @@
       </select>
       <div class="small" style="margin-top:6px;">多图任务可选保留当前扇出逻辑，或改为一次请求直接把 <code>n</code> 传给上游。</div>
     </div>
+    <div class="field">
+      <label>预览图个数</label>
+      <select id="previewCount">
+        <option value="0">0</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3" selected>3</option>
+      </select>
+      <div class="small" style="margin-top:6px;">控制流式阶段最多请求多少张中间预览图；设为 <code>0</code> 时不请求中间预览。</div>
+    </div>
   </div>
 </div>
 

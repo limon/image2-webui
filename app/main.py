@@ -48,6 +48,7 @@ DEFAULT_REASONING_EFFORT = "medium"
 DEFAULT_QUALITY = "high"
 DEFAULT_MODERATION = "low"
 DEFAULT_BATCH_MODE = "fanout"
+DEFAULT_PREVIEW_COUNT = 3
 DEFAULT_PROFILE_NAME = "默认"
 MAX_REF_IMAGES = 10
 MAX_IMAGE_COUNT = 4
@@ -118,6 +119,16 @@ def parse_batch_mode(value: str) -> str:
     if batch_mode not in {"fanout", "direct"}:
         raise ValueError("多图模式仅支持 fanout / direct")
     return batch_mode
+
+
+def parse_preview_count(value: Any) -> int:
+    try:
+        count = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("预览图个数仅支持 0 / 1 / 2 / 3") from exc
+    if count < 0 or count > 3:
+        raise ValueError("预览图个数仅支持 0 / 1 / 2 / 3")
+    return count
 
 
 def parse_image_count(value: Any) -> int:
@@ -388,6 +399,7 @@ class GenerateRequest(BaseModel):
     quality: str = DEFAULT_QUALITY
     moderation: str = DEFAULT_MODERATION
     batch_mode: str = DEFAULT_BATCH_MODE
+    preview_count: int = DEFAULT_PREVIEW_COUNT
 
 
 class FavoriteCreateRequest(BaseModel):
@@ -420,6 +432,7 @@ class SettingsProfileUpdateRequest(BaseModel):
     quality: str = DEFAULT_QUALITY
     moderation: str = DEFAULT_MODERATION
     batch_mode: str = DEFAULT_BATCH_MODE
+    preview_count: int = DEFAULT_PREVIEW_COUNT
     activate: bool = True
 
 
@@ -445,6 +458,7 @@ class SettingsProfileStore:
                     quality TEXT NOT NULL DEFAULT 'high',
                     moderation TEXT NOT NULL DEFAULT 'low',
                     batch_mode TEXT NOT NULL DEFAULT 'fanout',
+                    preview_count INTEGER NOT NULL DEFAULT 3,
                     is_active INTEGER NOT NULL DEFAULT 0,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL
@@ -466,6 +480,8 @@ class SettingsProfileStore:
                 conn.execute("ALTER TABLE settings_profiles ADD COLUMN moderation TEXT NOT NULL DEFAULT 'low'")
             if "batch_mode" not in cols:
                 conn.execute("ALTER TABLE settings_profiles ADD COLUMN batch_mode TEXT NOT NULL DEFAULT 'fanout'")
+            if "preview_count" not in cols:
+                conn.execute("ALTER TABLE settings_profiles ADD COLUMN preview_count INTEGER NOT NULL DEFAULT 3")
             if "is_active" not in cols:
                 conn.execute("ALTER TABLE settings_profiles ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0")
             if "created_at" not in cols:
@@ -528,9 +544,9 @@ class SettingsProfileStore:
             conn.execute(
                 """
                 INSERT INTO settings_profiles (
-                    id, name, api_key, base_url, model, quality, moderation, batch_mode,
+                    id, name, api_key, base_url, model, quality, moderation, batch_mode, preview_count,
                     is_active, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     profile_id,
@@ -541,6 +557,7 @@ class SettingsProfileStore:
                     source["quality"] if source else DEFAULT_QUALITY,
                     source["moderation"] if source else DEFAULT_MODERATION,
                     source["batch_mode"] if source else DEFAULT_BATCH_MODE,
+                    parse_preview_count(source["preview_count"]) if source else DEFAULT_PREVIEW_COUNT,
                     1,
                     ts,
                     ts,
@@ -563,6 +580,7 @@ class SettingsProfileStore:
         quality: str,
         moderation: str,
         batch_mode: str,
+        preview_count: int,
         activate: bool = True,
     ) -> dict[str, Any] | None:
         with self.connect() as conn:
@@ -577,7 +595,7 @@ class SettingsProfileStore:
                 """
                 UPDATE settings_profiles
                 SET name = ?, api_key = ?, base_url = ?, model = ?, quality = ?, moderation = ?,
-                    batch_mode = ?, is_active = ?, updated_at = ?
+                    batch_mode = ?, preview_count = ?, is_active = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -588,6 +606,7 @@ class SettingsProfileStore:
                     quality,
                     moderation,
                     batch_mode,
+                    preview_count,
                     1 if activate else int(row["is_active"] or 0),
                     ts,
                     profile_id,
@@ -645,9 +664,9 @@ class SettingsProfileStore:
             conn.execute(
                 """
                 INSERT INTO settings_profiles (
-                    id, name, api_key, base_url, model, quality, moderation, batch_mode,
+                    id, name, api_key, base_url, model, quality, moderation, batch_mode, preview_count,
                     is_active, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     uuid.uuid4().hex,
@@ -658,6 +677,7 @@ class SettingsProfileStore:
                     DEFAULT_QUALITY,
                     DEFAULT_MODERATION,
                     DEFAULT_BATCH_MODE,
+                    DEFAULT_PREVIEW_COUNT,
                     1,
                     ts,
                     ts,
@@ -718,6 +738,7 @@ class SettingsProfileStore:
             "quality": row["quality"] or DEFAULT_QUALITY,
             "moderation": row["moderation"] or DEFAULT_MODERATION,
             "batch_mode": row["batch_mode"] or DEFAULT_BATCH_MODE,
+            "preview_count": parse_preview_count(row["preview_count"] if row["preview_count"] is not None else DEFAULT_PREVIEW_COUNT),
             "is_active": bool(row["is_active"]),
             "created_at": int(row["created_at"] or 0),
             "updated_at": int(row["updated_at"] or 0),
@@ -918,6 +939,7 @@ class JobStore:
                     quality TEXT NOT NULL DEFAULT 'high',
                     moderation TEXT NOT NULL DEFAULT 'low',
                     batch_mode TEXT NOT NULL DEFAULT 'fanout',
+                    preview_count INTEGER NOT NULL DEFAULT 3,
                     revised_prompt TEXT,
                     progress_message TEXT,
                     debug_log TEXT,
@@ -950,6 +972,8 @@ class JobStore:
                 conn.execute("ALTER TABLE jobs ADD COLUMN moderation TEXT NOT NULL DEFAULT 'low'")
             if "batch_mode" not in cols:
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_mode TEXT NOT NULL DEFAULT 'fanout'")
+            if "preview_count" not in cols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN preview_count INTEGER NOT NULL DEFAULT 3")
             if "revised_prompt" not in cols:
                 conn.execute("ALTER TABLE jobs ADD COLUMN revised_prompt TEXT")
             if "image_count" not in cols:
@@ -975,11 +999,11 @@ class JobStore:
             conn.execute(
                 """
                 INSERT INTO jobs (
-                    id, type, status, prompt, size, model, base_url, quality, moderation, batch_mode, revised_prompt,
+                    id, type, status, prompt, size, model, base_url, quality, moderation, batch_mode, preview_count, revised_prompt,
                     progress_message, debug_log, error_message, image_count, preview_relpath, result_relpath,
                     preview_relpaths, result_relpaths, slot_errors, slot_revised_prompts, slot_preview_phases,
                     source_relpaths, mask_relpath, created_at, updated_at, completed_at, duration_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record["id"],
@@ -992,6 +1016,7 @@ class JobStore:
                     record["quality"],
                     record["moderation"],
                     record["batch_mode"],
+                    record["preview_count"],
                     record.get("revised_prompt"),
                     record.get("progress_message"),
                     to_json(record.get("debug_log", [])),
@@ -1345,6 +1370,7 @@ class JobStore:
             "status": status,
             "prompt": prompt[:180],
             "n": image_count,
+            "preview_count": parse_preview_count(row["preview_count"] if row["preview_count"] is not None else DEFAULT_PREVIEW_COUNT),
             "final_count": final_count,
             "rendered_count": rendered_count,
             "trashed": bool(row["trashed"]),
@@ -1386,6 +1412,7 @@ class JobStore:
             "quality": row["quality"] or DEFAULT_QUALITY,
             "moderation": row["moderation"] or DEFAULT_MODERATION,
             "batch_mode": row["batch_mode"] or DEFAULT_BATCH_MODE,
+            "preview_count": parse_preview_count(row["preview_count"] if row["preview_count"] is not None else DEFAULT_PREVIEW_COUNT),
             "revised_prompt": row["revised_prompt"],
             "progress_message": row["progress_message"],
             "debug_log": debug_log,
@@ -1586,6 +1613,7 @@ def make_job_record(
     quality: str,
     moderation: str,
     batch_mode: str,
+    preview_count: int,
     image_count: int,
     source_relpaths: list[str] | None = None,
     mask_relpath: str | None = None,
@@ -1602,6 +1630,7 @@ def make_job_record(
         "quality": quality,
         "moderation": moderation,
         "batch_mode": batch_mode,
+        "preview_count": preview_count,
         "image_count": image_count,
         "revised_prompt": None,
         "progress_message": "任务已提交，排队中…",
@@ -1751,6 +1780,7 @@ def build_responses_image_request(
     size: str,
     quality: str,
     moderation: str,
+    preview_count: int,
     image_count: int,
     input_image_relpaths: list[str] | None = None,
     mask_relpath: str | None = None,
@@ -1763,7 +1793,7 @@ def build_responses_image_request(
         "type": "image_generation",
         "action": action,
         "model": DEFAULT_IMAGE_TOOL_MODEL,
-        "partial_images": 3,
+        "partial_images": preview_count,
     }
     if size:
         tool["size"] = size
@@ -2500,7 +2530,7 @@ async def process_job(job_id: str) -> None:
                             "quality": job["quality"],
                             "moderation": job["moderation"],
                             "stream": True,
-                            "partial_images": 3,
+                            "partial_images": job["preview_count"],
                         }
                     else:
                         store.append_debug_log(job_id, f"当前 model={job['model']}，将 image2 请求中转为 responses API", "info")
@@ -2511,6 +2541,7 @@ async def process_job(job_id: str) -> None:
                             size=job["size"],
                             quality=job["quality"],
                             moderation=job["moderation"],
+                            preview_count=job["preview_count"],
                             image_count=job["n"],
                         )
                     result_relpaths, note = await run_stream_request(
@@ -2542,7 +2573,7 @@ async def process_job(job_id: str) -> None:
                                     "quality": job["quality"],
                                     "moderation": job["moderation"],
                                     "stream": True,
-                                    "partial_images": 3,
+                                    "partial_images": job["preview_count"],
                                 }
                                 if use_direct_images
                                 else build_responses_image_request(
@@ -2552,6 +2583,7 @@ async def process_job(job_id: str) -> None:
                                     size=job["size"],
                                     quality=job["quality"],
                                     moderation=job["moderation"],
+                                    preview_count=job["preview_count"],
                                     image_count=1,
                                 )
                             ),
@@ -2624,7 +2656,7 @@ async def process_job(job_id: str) -> None:
                                 "quality": job["quality"],
                                 "moderation": job["moderation"],
                                 "stream": "true",
-                                "partial_images": "3",
+                                "partial_images": str(job["preview_count"]),
                             },
                             file_specs=file_specs,
                             original_prompt=job["prompt"],
@@ -2643,6 +2675,7 @@ async def process_job(job_id: str) -> None:
                                 size=job["size"],
                                 quality=job["quality"],
                                 moderation=job["moderation"],
+                                preview_count=job["preview_count"],
                                 image_count=job["n"],
                                 input_image_relpaths=source_relpaths,
                                 mask_relpath=(
@@ -2674,7 +2707,7 @@ async def process_job(job_id: str) -> None:
                                     "quality": job["quality"],
                                     "moderation": job["moderation"],
                                     "stream": "true",
-                                    "partial_images": "3",
+                                    "partial_images": str(job["preview_count"]),
                                 },
                                 file_specs=file_specs,
                                 original_prompt=job["prompt"],
@@ -2694,6 +2727,7 @@ async def process_job(job_id: str) -> None:
                                 size=job["size"],
                                 quality=job["quality"],
                                 moderation=job["moderation"],
+                                preview_count=job["preview_count"],
                                 image_count=1,
                                 input_image_relpaths=source_relpaths,
                                 mask_relpath=(
@@ -2938,6 +2972,7 @@ async def update_settings_profile(profile_id: str, payload: SettingsProfileUpdat
         quality = parse_quality(payload.quality)
         moderation = parse_moderation(payload.moderation)
         batch_mode = parse_batch_mode(payload.batch_mode)
+        preview_count = parse_preview_count(payload.preview_count)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     profile = settings_store.update_profile(
@@ -2949,6 +2984,7 @@ async def update_settings_profile(profile_id: str, payload: SettingsProfileUpdat
         quality=quality,
         moderation=moderation,
         batch_mode=batch_mode,
+        preview_count=preview_count,
         activate=payload.activate,
     )
     if not profile:
@@ -3118,6 +3154,7 @@ async def submit_generate(payload: GenerateRequest) -> dict[str, Any]:
         quality = parse_quality(payload.quality)
         moderation = parse_moderation(payload.moderation)
         batch_mode = parse_batch_mode(payload.batch_mode)
+        preview_count = parse_preview_count(payload.preview_count)
         api_key = normalize_api_key(payload.api_key)
         model = normalize_model(payload.model)
         base_url = normalize_base_url(payload.base_url)
@@ -3136,6 +3173,7 @@ async def submit_generate(payload: GenerateRequest) -> dict[str, Any]:
             quality=quality,
             moderation=moderation,
             batch_mode=batch_mode,
+            preview_count=preview_count,
             image_count=image_count,
         )
     )
@@ -3155,6 +3193,7 @@ async def submit_edit(
     quality: str = Form(DEFAULT_QUALITY),
     moderation: str = Form(DEFAULT_MODERATION),
     batch_mode: str = Form(DEFAULT_BATCH_MODE),
+    preview_count: str = Form(str(DEFAULT_PREVIEW_COUNT)),
     image: UploadFile = File(...),
     mask: UploadFile | None = File(None),
 ) -> dict[str, Any]:
@@ -3166,6 +3205,7 @@ async def submit_edit(
         quality = parse_quality(quality)
         moderation = parse_moderation(moderation)
         batch_mode = parse_batch_mode(batch_mode)
+        preview_count = parse_preview_count(preview_count)
         normalized_api_key = normalize_api_key(api_key)
         normalized_model = normalize_model(model)
         normalized_base_url = normalize_base_url(base_url)
@@ -3186,6 +3226,7 @@ async def submit_edit(
             quality=quality,
             moderation=moderation,
             batch_mode=batch_mode,
+            preview_count=preview_count,
             image_count=image_count,
             source_relpaths=[source_relpath],
             mask_relpath=mask_relpath,
@@ -3207,6 +3248,7 @@ async def submit_reference(
     quality: str = Form(DEFAULT_QUALITY),
     moderation: str = Form(DEFAULT_MODERATION),
     batch_mode: str = Form(DEFAULT_BATCH_MODE),
+    preview_count: str = Form(str(DEFAULT_PREVIEW_COUNT)),
     images: list[UploadFile] = File(..., alias="image"),
 ) -> dict[str, Any]:
     if not prompt.strip():
@@ -3221,6 +3263,7 @@ async def submit_reference(
         quality = parse_quality(quality)
         moderation = parse_moderation(moderation)
         batch_mode = parse_batch_mode(batch_mode)
+        preview_count = parse_preview_count(preview_count)
         normalized_api_key = normalize_api_key(api_key)
         normalized_model = normalize_model(model)
         normalized_base_url = normalize_base_url(base_url)
@@ -3243,6 +3286,7 @@ async def submit_reference(
             quality=quality,
             moderation=moderation,
             batch_mode=batch_mode,
+            preview_count=preview_count,
             image_count=image_count,
             source_relpaths=source_relpaths,
         )

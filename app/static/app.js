@@ -16,6 +16,7 @@
   const DEFAULT_QUALITY = 'high';
   const DEFAULT_MODERATION = 'low';
   const DEFAULT_BATCH_MODE = 'fanout';
+  const DEFAULT_PREVIEW_COUNT = 3;
   const DEFAULT_IMAGE_COUNT = 1;
 
   const MULTIPLE_OF = 16;
@@ -163,6 +164,7 @@
       quality: String(profile?.quality || DEFAULT_QUALITY),
       moderation: String(profile?.moderation || DEFAULT_MODERATION),
       batch_mode: normalizeBatchMode(profile?.batch_mode || DEFAULT_BATCH_MODE),
+      preview_count: normalizePreviewCount(profile?.preview_count),
       is_active: Boolean(profile?.is_active),
     };
   }
@@ -191,6 +193,7 @@
     $('quality').value = profile.quality || DEFAULT_QUALITY;
     $('moderation').value = profile.moderation || DEFAULT_MODERATION;
     setBatchMode(profile.batch_mode || DEFAULT_BATCH_MODE);
+    setPreviewCount(profile.preview_count);
     const select = $('settingsProfileSelect');
     if (select) select.value = profile.id;
     suppressSettingsDirty = false;
@@ -219,6 +222,7 @@
       quality: (($('quality')?.value) || DEFAULT_QUALITY).trim(),
       moderation: (($('moderation')?.value) || DEFAULT_MODERATION).trim(),
       batch_mode: normalizeBatchMode(($('batchMode')?.value) || DEFAULT_BATCH_MODE),
+      preview_count: normalizePreviewCount($('previewCount')?.value),
       activate: true,
     };
   }
@@ -231,6 +235,7 @@
       quality: (localStorage.getItem(LS_QUALITY) || DEFAULT_QUALITY).trim(),
       moderation: (localStorage.getItem(LS_MODERATION) || DEFAULT_MODERATION).trim(),
       batch_mode: DEFAULT_BATCH_MODE,
+      preview_count: DEFAULT_PREVIEW_COUNT,
     };
     const hasLegacy = profile.api_key
       || localStorage.getItem(LS_BASE)
@@ -255,7 +260,8 @@
       && (profile.model || DEFAULT_MODEL) === DEFAULT_MODEL
       && (profile.quality || DEFAULT_QUALITY) === DEFAULT_QUALITY
       && (profile.moderation || DEFAULT_MODERATION) === DEFAULT_MODERATION
-      && normalizeBatchMode(profile.batch_mode || DEFAULT_BATCH_MODE) === DEFAULT_BATCH_MODE;
+      && normalizeBatchMode(profile.batch_mode || DEFAULT_BATCH_MODE) === DEFAULT_BATCH_MODE
+      && normalizePreviewCount(profile.preview_count) === DEFAULT_PREVIEW_COUNT;
   }
 
   async function maybeMigrateLegacyProfile() {
@@ -741,7 +747,8 @@
     const quality = (($('quality')?.value) || DEFAULT_QUALITY).trim();
     const moderation = (($('moderation')?.value) || DEFAULT_MODERATION).trim();
     const batchMode = normalizeBatchMode(($('batchMode')?.value) || DEFAULT_BATCH_MODE);
-    return { key, base, model, quality, moderation, batchMode };
+    const previewCount = normalizePreviewCount($('previewCount')?.value);
+    return { key, base, model, quality, moderation, batchMode, previewCount };
   }
 
   function normalizeBatchMode(value) {
@@ -750,6 +757,16 @@
 
   function setBatchMode(value) {
     if ($('batchMode')) $('batchMode').value = normalizeBatchMode(value);
+  }
+
+  function normalizePreviewCount(value) {
+    const raw = parseInt(String(value ?? DEFAULT_PREVIEW_COUNT), 10);
+    if (!Number.isFinite(raw)) return DEFAULT_PREVIEW_COUNT;
+    return Math.min(3, Math.max(0, raw));
+  }
+
+  function setPreviewCount(value) {
+    if ($('previewCount')) $('previewCount').value = String(normalizePreviewCount(value));
   }
 
   function batchModeLabel(value) {
@@ -1489,6 +1506,7 @@
     if (job.size) stats.push(job.size);
     if (job.quality) stats.push(`quality:${job.quality}`);
     if (job.moderation) stats.push(`moderation:${job.moderation}`);
+    if (job.preview_count !== undefined && job.preview_count !== null) stats.push(`preview:${normalizePreviewCount(job.preview_count)}`);
     if (job.duration_ms) stats.push(`${(job.duration_ms / 1000).toFixed(1)}s`);
     stats.push(fmtTime(job.created_at));
     return stats;
@@ -2581,6 +2599,7 @@
       }
     }
     setBatchMode(rec.batch_mode || DEFAULT_BATCH_MODE);
+    setPreviewCount(rec.preview_count);
     $('quality').value = rec.quality || DEFAULT_QUALITY;
     $('moderation').value = rec.moderation || DEFAULT_MODERATION;
   }
@@ -2666,6 +2685,7 @@
   $('quality').value = DEFAULT_QUALITY;
   $('moderation').value = DEFAULT_MODERATION;
   setBatchMode(DEFAULT_BATCH_MODE);
+  setPreviewCount(DEFAULT_PREVIEW_COUNT);
   setTaskCount('genCount', DEFAULT_IMAGE_COUNT);
   setTaskCount('editCount', DEFAULT_IMAGE_COUNT);
   setTaskCount('refCount', DEFAULT_IMAGE_COUNT);
@@ -2684,7 +2704,7 @@
   ['profileName', 'apiKey', 'baseUrl', 'model'].forEach((id) => {
     $(id).addEventListener('input', markSettingsDirty);
   });
-  ['quality', 'moderation', 'batchMode'].forEach((id) => {
+  ['quality', 'moderation', 'batchMode', 'previewCount'].forEach((id) => {
     $(id).addEventListener('change', markSettingsDirty);
   });
 
@@ -2829,7 +2849,7 @@
     const result = $('genResult');
     try {
       await ensureSettingsSaved();
-      const { key, base, model, quality, moderation, batchMode } = getCreds();
+      const { key, base, model, quality, moderation, batchMode, previewCount } = getCreds();
       const count = getTaskCount('genCount');
       const prompt = $('genPrompt').value.trim();
       const sizeResult = resolveSize('genSize', 'genSizeCustom');
@@ -2854,6 +2874,7 @@
           quality,
           moderation,
           batch_mode: batchMode,
+          preview_count: previewCount,
         }),
       });
       rememberActiveJob('generate', job.id);
@@ -2875,7 +2896,7 @@
     const result = $('editResult');
     try {
       await ensureSettingsSaved();
-      const { key, base, model, quality, moderation, batchMode } = getCreds();
+      const { key, base, model, quality, moderation, batchMode, previewCount } = getCreds();
       const count = getTaskCount('editCount');
       const imageFile = $('editImage').files[0];
       const maskFile = maskFileFromEditor || $('editMask').files[0];
@@ -2909,6 +2930,7 @@
       fd.append('quality', quality);
       fd.append('moderation', moderation);
       fd.append('batch_mode', batchMode);
+      fd.append('preview_count', String(previewCount));
       fd.append('image', uploadImage);
       if (uploadMask) fd.append('mask', uploadMask);
 
@@ -2932,7 +2954,7 @@
     const result = $('refResult');
     try {
       await ensureSettingsSaved();
-      const { key, base, model, quality, moderation, batchMode } = getCreds();
+      const { key, base, model, quality, moderation, batchMode, previewCount } = getCreds();
       const count = getTaskCount('refCount');
       const prompt = $('refPrompt').value.trim();
       const sizeResult = resolveSize('refSize', 'refSizeCustom');
@@ -2961,6 +2983,7 @@
       fd.append('quality', quality);
       fd.append('moderation', moderation);
       fd.append('batch_mode', batchMode);
+      fd.append('preview_count', String(previewCount));
       uploadImages.forEach((file) => fd.append('image', file));
 
       const job = await api('/api/jobs/reference', { method: 'POST', body: fd });

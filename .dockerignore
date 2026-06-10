@@ -8,8 +8,4 @@ __pycache__
 *.pyd
 .DS_Store
 
-app/data/files
-app/data/jobs/jobs.sqlite3
-app/data/jobs/*.sqlite3
-app/data/jobs/*.db
-app/data/jobs/*.sqlite*
+app/data
