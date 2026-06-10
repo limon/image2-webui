@@ -1790,11 +1790,21 @@ def summarize_request_payload(payload: dict[str, Any]) -> str:
         return str(payload)
 
 
+def summarize_data_url(value: str) -> str:
+    mime = "unknown"
+    if value.startswith("data:"):
+        header = value.split(",", 1)[0]
+        mime = header[5:].split(";", 1)[0] or mime
+    return f"<data_url:{mime}:{len(value)} chars>"
+
+
 def redact_large_strings(value: Any, *, max_len: int = 160) -> Any:
     if isinstance(value, dict):
         result: dict[str, Any] = {}
         for key, item in value.items():
-            if key in {"b64_json", "partial_image_b64", "image_b64", "result"} and isinstance(item, str):
+            if key == "image_url" and isinstance(item, str) and item.startswith("data:"):
+                result[key] = summarize_data_url(item)
+            elif key in {"b64_json", "partial_image_b64", "image_b64", "result"} and isinstance(item, str):
                 result[key] = f"<{key}:{len(item)} chars>"
             else:
                 result[key] = redact_large_strings(item, max_len=max_len)
@@ -2204,6 +2214,26 @@ async def consume_stream_response(
     on_update: Any | None = None,
     log_debug: Any | None = None,
 ) -> tuple[list[str], str | None]:
+    noisy_event_counts: dict[str, int] = {}
+
+    def is_noisy_sse_event(event_name: str | None) -> bool:
+        return event_name in {
+            "keepalive",
+            "response.output_item.added",
+            "response.output_item.done",
+            "response.content_part.added",
+            "response.content_part.done",
+            "response.output_text.delta",
+            "response.output_text.done",
+        }
+
+    def flush_noisy_sse_events() -> None:
+        if not noisy_event_counts:
+            return
+        parts = [f"{name} x{count}" for name, count in sorted(noisy_event_counts.items())]
+        debug(f"已省略高频 SSE 事件: {'；'.join(parts)}", "event")
+        noisy_event_counts.clear()
+
     slot_errors: list[str | None] = [None] * total_slots
     slot_revised_prompts: list[str | None] = [None] * total_slots
     slot_preview_phases: list[int | None] = [None] * total_slots
@@ -2310,7 +2340,11 @@ async def consume_stream_response(
                 continue
             if line.startswith("event:"):
                 last_event = line[6:].strip()
-                debug(f"SSE event: {last_event}", "event")
+                if is_noisy_sse_event(last_event):
+                    noisy_event_counts[last_event] = noisy_event_counts.get(last_event, 0) + 1
+                else:
+                    flush_noisy_sse_events()
+                    debug(f"SSE event: {last_event}", "event")
                 continue
             if not line.startswith("data:"):
                 if raw_line_count <= 12:
@@ -2320,6 +2354,7 @@ async def consume_stream_response(
             if not data_str:
                 continue
             if data_str == "[DONE]":
+                flush_noisy_sse_events()
                 debug("SSE data: [DONE]", "event")
                 continue
             try:
@@ -2338,6 +2373,7 @@ async def consume_stream_response(
             )
             images = extract_payload_images(payload)
             if images:
+                flush_noisy_sse_events()
                 image_meta = [
                     {
                         "index": index,
@@ -2351,6 +2387,7 @@ async def consume_stream_response(
                     "event",
                 )
             elif is_final_image_payload(payload, last_event):
+                flush_noisy_sse_events()
                 debug(
                     f"SSE completed payload #{payload_count}: {summarize_payload_details(payload)[:1200]}",
                     "event",
@@ -2443,6 +2480,7 @@ async def consume_stream_response(
                 )
 
     if compact_relpaths(preview_relpaths) or compact_relpaths(result_relpaths):
+        flush_noisy_sse_events()
         final_count = len(compact_relpaths(result_relpaths))
         preview_count = len(compact_relpaths(preview_relpaths))
         unresolved_indexes = [idx for idx in range(total_slots) if not result_relpaths[idx] and not preview_relpaths[idx]]
@@ -2461,6 +2499,7 @@ async def consume_stream_response(
         )
         return compact_relpaths(result_relpaths), "流式响应提前结束，已保留最终图和可用预览"
     details = []
+    flush_noisy_sse_events()
     details.append(f"chunk 数: {chunk_count}")
     details.append(f"字符数: {total_chars}")
     if last_event:
