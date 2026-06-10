@@ -1,0 +1,9 @@
+services:
+  image2-webui:
+    image: limon/image2-webui:latest
+    container_name: image2-webui
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

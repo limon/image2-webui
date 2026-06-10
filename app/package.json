@@ -1,0 +1,12 @@
+{
+  "name": "image2-webui-app",
+  "private": true,
+  "packageManager": "pnpm@11.1.1",
+  "scripts": {
+    "postinstall": "pnpm run sync:py",
+    "dev": "uv run uvicorn main:app --reload",
+    "start": "uv run uvicorn main:app --host 0.0.0.0 --port 8000",
+    "sync:py": "uv sync",
+    "check": "uv run python -m py_compile main.py"
+  }
+}

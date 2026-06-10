@@ -1,0 +1,11 @@
+services:
+  image2-webui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: image2-webui
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app/data:/app/data
+    restart: unless-stopped

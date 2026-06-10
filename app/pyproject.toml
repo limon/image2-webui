@@ -1,0 +1,15 @@
+[project]
+name = "image2-webui-app"
+version = "0.1.0"
+description = "Server-backed async image generation UI"
+requires-python = ">=3.13"
+dependencies = [
+  "fastapi>=0.115.12",
+  "httpx>=0.28.1",
+  "pillow>=11.2.1",
+  "python-multipart>=0.0.20",
+  "uvicorn>=0.34.2",
+]
+
+[tool.uv]
+package = false
