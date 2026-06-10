@@ -432,8 +432,11 @@ class SettingsProfileUpdateRequest(BaseModel):
     quality: str = DEFAULT_QUALITY
     moderation: str = DEFAULT_MODERATION
     batch_mode: str = DEFAULT_BATCH_MODE
-    preview_count: int = DEFAULT_PREVIEW_COUNT
     activate: bool = True
+
+
+class GlobalSettingsUpdateRequest(BaseModel):
+    preview_count: int = DEFAULT_PREVIEW_COUNT
 
 
 class SettingsProfileStore:
@@ -458,10 +461,17 @@ class SettingsProfileStore:
                     quality TEXT NOT NULL DEFAULT 'high',
                     moderation TEXT NOT NULL DEFAULT 'low',
                     batch_mode TEXT NOT NULL DEFAULT 'fanout',
-                    preview_count INTEGER NOT NULL DEFAULT 3,
                     is_active INTEGER NOT NULL DEFAULT 0,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
                 )
                 """
             )
@@ -480,8 +490,6 @@ class SettingsProfileStore:
                 conn.execute("ALTER TABLE settings_profiles ADD COLUMN moderation TEXT NOT NULL DEFAULT 'low'")
             if "batch_mode" not in cols:
                 conn.execute("ALTER TABLE settings_profiles ADD COLUMN batch_mode TEXT NOT NULL DEFAULT 'fanout'")
-            if "preview_count" not in cols:
-                conn.execute("ALTER TABLE settings_profiles ADD COLUMN preview_count INTEGER NOT NULL DEFAULT 3")
             if "is_active" not in cols:
                 conn.execute("ALTER TABLE settings_profiles ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0")
             if "created_at" not in cols:
@@ -489,6 +497,7 @@ class SettingsProfileStore:
             if "updated_at" not in cols:
                 conn.execute("ALTER TABLE settings_profiles ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")
             self._ensure_seeded(conn)
+            self._ensure_global_settings(conn, legacy_profile_cols=cols)
             conn.commit()
 
     def list_profiles(self) -> list[dict[str, Any]]:
@@ -544,9 +553,9 @@ class SettingsProfileStore:
             conn.execute(
                 """
                 INSERT INTO settings_profiles (
-                    id, name, api_key, base_url, model, quality, moderation, batch_mode, preview_count,
+                    id, name, api_key, base_url, model, quality, moderation, batch_mode,
                     is_active, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     profile_id,
@@ -557,7 +566,6 @@ class SettingsProfileStore:
                     source["quality"] if source else DEFAULT_QUALITY,
                     source["moderation"] if source else DEFAULT_MODERATION,
                     source["batch_mode"] if source else DEFAULT_BATCH_MODE,
-                    parse_preview_count(source["preview_count"]) if source else DEFAULT_PREVIEW_COUNT,
                     1,
                     ts,
                     ts,
@@ -580,7 +588,6 @@ class SettingsProfileStore:
         quality: str,
         moderation: str,
         batch_mode: str,
-        preview_count: int,
         activate: bool = True,
     ) -> dict[str, Any] | None:
         with self.connect() as conn:
@@ -595,7 +602,7 @@ class SettingsProfileStore:
                 """
                 UPDATE settings_profiles
                 SET name = ?, api_key = ?, base_url = ?, model = ?, quality = ?, moderation = ?,
-                    batch_mode = ?, preview_count = ?, is_active = ?, updated_at = ?
+                    batch_mode = ?, is_active = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -606,7 +613,6 @@ class SettingsProfileStore:
                     quality,
                     moderation,
                     batch_mode,
-                    preview_count,
                     1 if activate else int(row["is_active"] or 0),
                     ts,
                     profile_id,
@@ -664,9 +670,9 @@ class SettingsProfileStore:
             conn.execute(
                 """
                 INSERT INTO settings_profiles (
-                    id, name, api_key, base_url, model, quality, moderation, batch_mode, preview_count,
+                    id, name, api_key, base_url, model, quality, moderation, batch_mode,
                     is_active, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     uuid.uuid4().hex,
@@ -677,7 +683,6 @@ class SettingsProfileStore:
                     DEFAULT_QUALITY,
                     DEFAULT_MODERATION,
                     DEFAULT_BATCH_MODE,
-                    DEFAULT_PREVIEW_COUNT,
                     1,
                     ts,
                     ts,
@@ -698,6 +703,50 @@ class SettingsProfileStore:
             if first:
                 conn.execute("UPDATE settings_profiles SET is_active = 0")
                 conn.execute("UPDATE settings_profiles SET is_active = 1 WHERE id = ?", (first["id"],))
+
+    def _ensure_global_settings(self, conn: sqlite3.Connection, *, legacy_profile_cols: set[str]) -> None:
+        preview_count_row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'preview_count'"
+        ).fetchone()
+        if preview_count_row:
+            return
+        fallback = DEFAULT_PREVIEW_COUNT
+        if "preview_count" in legacy_profile_cols:
+            row = conn.execute(
+                """
+                SELECT preview_count FROM settings_profiles
+                ORDER BY is_active DESC, updated_at DESC, created_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if row and row["preview_count"] is not None:
+                fallback = parse_preview_count(row["preview_count"])
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?)",
+            ("preview_count", str(fallback)),
+        )
+
+    def get_global_preview_count(self) -> int:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key = 'preview_count'"
+            ).fetchone()
+        if not row:
+            return DEFAULT_PREVIEW_COUNT
+        return parse_preview_count(row["value"])
+
+    def update_global_preview_count(self, preview_count: int) -> int:
+        safe_count = parse_preview_count(preview_count)
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_settings (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                ("preview_count", str(safe_count)),
+            )
+            conn.commit()
+        return safe_count
 
     def _fetch_profile_row(self, conn: sqlite3.Connection, profile_id: str | None) -> sqlite3.Row | None:
         if not profile_id:
@@ -738,7 +787,6 @@ class SettingsProfileStore:
             "quality": row["quality"] or DEFAULT_QUALITY,
             "moderation": row["moderation"] or DEFAULT_MODERATION,
             "batch_mode": row["batch_mode"] or DEFAULT_BATCH_MODE,
-            "preview_count": parse_preview_count(row["preview_count"] if row["preview_count"] is not None else DEFAULT_PREVIEW_COUNT),
             "is_active": bool(row["is_active"]),
             "created_at": int(row["created_at"] or 0),
             "updated_at": int(row["updated_at"] or 0),
@@ -1527,6 +1575,7 @@ def build_settings_profiles_response() -> dict[str, Any]:
     active = settings_store.get_active_profile()
     return {
         "active_profile_id": active["id"],
+        "preview_count": settings_store.get_global_preview_count(),
         "items": settings_store.list_profiles(),
     }
 
@@ -2972,7 +3021,6 @@ async def update_settings_profile(profile_id: str, payload: SettingsProfileUpdat
         quality = parse_quality(payload.quality)
         moderation = parse_moderation(payload.moderation)
         batch_mode = parse_batch_mode(payload.batch_mode)
-        preview_count = parse_preview_count(payload.preview_count)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     profile = settings_store.update_profile(
@@ -2984,11 +3032,20 @@ async def update_settings_profile(profile_id: str, payload: SettingsProfileUpdat
         quality=quality,
         moderation=moderation,
         batch_mode=batch_mode,
-        preview_count=preview_count,
         activate=payload.activate,
     )
     if not profile:
         raise HTTPException(status_code=404, detail="Profile 不存在")
+    return build_settings_profiles_response()
+
+
+@app.put("/api/settings/global")
+async def update_global_settings(payload: GlobalSettingsUpdateRequest) -> dict[str, Any]:
+    try:
+        preview_count = parse_preview_count(payload.preview_count)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    settings_store.update_global_preview_count(preview_count)
     return build_settings_profiles_response()
 
 

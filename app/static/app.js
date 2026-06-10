@@ -140,7 +140,7 @@
 
   function refreshSettingsStatus() {
     if (settingsDirty) {
-      setSettingsStatus('当前 profile 有未保存修改', 'dirty');
+      setSettingsStatus('当前设置有未保存修改', 'dirty');
       return;
     }
     if (getCurrentProfile()) {
@@ -164,7 +164,6 @@
       quality: String(profile?.quality || DEFAULT_QUALITY),
       moderation: String(profile?.moderation || DEFAULT_MODERATION),
       batch_mode: normalizeBatchMode(profile?.batch_mode || DEFAULT_BATCH_MODE),
-      preview_count: normalizePreviewCount(profile?.preview_count),
       is_active: Boolean(profile?.is_active),
     };
   }
@@ -193,7 +192,6 @@
     $('quality').value = profile.quality || DEFAULT_QUALITY;
     $('moderation').value = profile.moderation || DEFAULT_MODERATION;
     setBatchMode(profile.batch_mode || DEFAULT_BATCH_MODE);
-    setPreviewCount(profile.preview_count);
     const select = $('settingsProfileSelect');
     if (select) select.value = profile.id;
     suppressSettingsDirty = false;
@@ -205,6 +203,7 @@
   function applySettingsPayload(payload, options = {}) {
     settingsProfiles = Array.isArray(payload?.items) ? payload.items.map(normalizeProfileRecord) : [];
     activeProfileId = String(payload?.active_profile_id || settingsProfiles[0]?.id || '');
+    setPreviewCount(payload?.preview_count);
     renderSettingsProfileOptions();
     const profile = getCurrentProfile() || settingsProfiles[0] || null;
     if (profile) {
@@ -222,8 +221,13 @@
       quality: (($('quality')?.value) || DEFAULT_QUALITY).trim(),
       moderation: (($('moderation')?.value) || DEFAULT_MODERATION).trim(),
       batch_mode: normalizeBatchMode(($('batchMode')?.value) || DEFAULT_BATCH_MODE),
-      preview_count: normalizePreviewCount($('previewCount')?.value),
       activate: true,
+    };
+  }
+
+  function getGlobalSettingsPayload() {
+    return {
+      preview_count: normalizePreviewCount($('previewCount')?.value),
     };
   }
 
@@ -235,7 +239,6 @@
       quality: (localStorage.getItem(LS_QUALITY) || DEFAULT_QUALITY).trim(),
       moderation: (localStorage.getItem(LS_MODERATION) || DEFAULT_MODERATION).trim(),
       batch_mode: DEFAULT_BATCH_MODE,
-      preview_count: DEFAULT_PREVIEW_COUNT,
     };
     const hasLegacy = profile.api_key
       || localStorage.getItem(LS_BASE)
@@ -260,8 +263,7 @@
       && (profile.model || DEFAULT_MODEL) === DEFAULT_MODEL
       && (profile.quality || DEFAULT_QUALITY) === DEFAULT_QUALITY
       && (profile.moderation || DEFAULT_MODERATION) === DEFAULT_MODERATION
-      && normalizeBatchMode(profile.batch_mode || DEFAULT_BATCH_MODE) === DEFAULT_BATCH_MODE
-      && normalizePreviewCount(profile.preview_count) === DEFAULT_PREVIEW_COUNT;
+      && normalizeBatchMode(profile.batch_mode || DEFAULT_BATCH_MODE) === DEFAULT_BATCH_MODE;
   }
 
   async function maybeMigrateLegacyProfile() {
@@ -289,7 +291,7 @@
   function markSettingsDirty() {
     if (suppressSettingsDirty) return;
     settingsDirty = true;
-    setSettingsStatus('当前 profile 有未保存修改', 'dirty');
+    setSettingsStatus('当前设置有未保存修改', 'dirty');
   }
 
   async function saveCurrentProfile(options = {}) {
@@ -305,6 +307,24 @@
       message: options.message || '✓ 已保存到数据库',
       tone: options.tone || 'ok',
     });
+  }
+
+  async function saveGlobalSettings(options = {}) {
+    await settingsReady;
+    const payload = await api('/api/settings/global', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(getGlobalSettingsPayload()),
+    });
+    applySettingsPayload(payload, {
+      message: options.message || '✓ 已保存到数据库',
+      tone: options.tone || 'ok',
+    });
+  }
+
+  async function saveAllSettings(options = {}) {
+    await saveGlobalSettings({ message: options.message || '✓ 已保存到数据库', tone: options.tone || 'ok' });
+    await saveCurrentProfile({ message: options.message || '✓ 已保存到数据库', tone: options.tone || 'ok' });
   }
 
   async function activateProfile(profileId) {
@@ -341,7 +361,7 @@
 
   async function ensureSettingsSaved() {
     await settingsReady;
-    if (settingsDirty) await saveCurrentProfile({ message: '✓ 已自动保存到数据库' });
+    if (settingsDirty) await saveAllSettings({ message: '✓ 已自动保存到数据库' });
   }
 
   async function initSettingsProfiles() {
@@ -2599,7 +2619,6 @@
       }
     }
     setBatchMode(rec.batch_mode || DEFAULT_BATCH_MODE);
-    setPreviewCount(rec.preview_count);
     $('quality').value = rec.quality || DEFAULT_QUALITY;
     $('moderation').value = rec.moderation || DEFAULT_MODERATION;
   }
@@ -2711,7 +2730,7 @@
   $('settingsProfileSelect').addEventListener('change', async (e) => {
     const nextId = e.target.value;
     if (!nextId || nextId === activeProfileId) return;
-    if (settingsDirty && !confirm('当前 profile 有未保存修改，切换后会丢失这些修改。继续吗？')) {
+    if (settingsDirty && !confirm('当前设置有未保存修改，切换后会丢失这些修改。继续吗？')) {
       e.target.value = activeProfileId;
       return;
     }
@@ -2741,7 +2760,7 @@
 
   $('saveKey').addEventListener('click', async () => {
     try {
-      await saveCurrentProfile({ message: '✓ 已保存到数据库' });
+      await saveAllSettings({ message: '✓ 已保存到数据库' });
     } catch (e) {
       setSettingsStatus(`保存失败: ${e.message}`, 'error');
     }
